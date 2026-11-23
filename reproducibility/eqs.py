@@ -1,6 +1,9 @@
 """
 eqs.py  -  Renders the 17 equations as PNG (only used for the PDF preview of the manuscript).
 """
+import os
+os.makedirs('eqs', exist_ok=True)
+
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
