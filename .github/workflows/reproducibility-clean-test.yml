@@ -1,0 +1,82 @@
+name: Clean reproducibility test
+
+on:
+  push:
+    branches:
+      - reproducibility-clean-test
+
+permissions:
+  contents: read
+
+jobs:
+  clean-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out test branch
+        uses: actions/checkout@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: reproducibility/requirements.txt
+      - name: Show runtime versions
+        run: |
+          python --version
+          python -m pip --version
+      - name: Install pinned dependencies
+        working-directory: reproducibility
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip check
+      - name: Run complete reproduction pipeline
+        working-directory: reproducibility
+        run: bash run_all.sh
+      - name: Verify regenerated outputs
+        working-directory: reproducibility
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          required = [
+              "results.json", "results2.json", "results3.json", "mats.json",
+              "figs/base.npz", "figs/fig_model.png", "figs/fig_chain.png",
+              "figs/fig_bump.png", "figs/fig_pareto.png",
+              "figs/fig_psd.png", "figs/fig_mc.png"
+          ]
+          missing = [p for p in required if not Path(p).is_file() or Path(p).stat().st_size == 0]
+          if missing:
+              raise SystemExit("Missing or empty outputs: " + ", ".join(missing))
+          r = json.loads(Path("results.json").read_text())
+          r2 = json.loads(Path("results2.json").read_text())
+          r3 = json.loads(Path("results3.json").read_text())
+          mats = json.loads(Path("mats.json").read_text())
+          assert all(k in r for k in ("K_B", "K_C", "K_H", "bump", "random", "pareto", "mc2", "psd"))
+          assert all(k in r2 for k in ("wrms", "ladder_bump", "ladder_rand", "sens", "mc_real"))
+          assert all(k in r3 for k in ("None", "0.2", "0.5", "margin_05"))
+          assert all(k in mats for k in ("A", "B", "G"))
+          assert len(r["mc2"]) == 200
+          assert len(r2["mc_real"]) == 100
+          print("OUTPUT_VALIDATION_OK")
+          print("results.json: keys", sorted(r.keys()))
+          print("results2.json: keys", sorted(r2.keys()))
+          print("results3.json:", r3)
+          print("Monte Carlo samples: ideal=200, realistic=100")
+          print("Generated figures: 6; matrices: A, B, G")
+          PY
+      - name: Upload regenerated outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clean-reproducibility-test-outputs
+          path: |
+            reproducibility/results.json
+            reproducibility/results2.json
+            reproducibility/results3.json
+            reproducibility/mats.json
+            reproducibility/figs/*.png
+            reproducibility/figs/base.npz
+          if-no-files-found: warn
+          retention-days: 14
